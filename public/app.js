@@ -10,19 +10,19 @@ const imageModePanel = document.getElementById("imageMode");
 const textModePanel = document.getElementById("textMode");
 
 const dropzone = document.getElementById("dropzone");
-const dropzoneEmpty = document.getElementById("dropzoneEmpty");
+const dropzoneText = document.getElementById("dropzoneText");
 const imageFileInput = document.getElementById("imageFile");
-const imagePreview = document.getElementById("imagePreview");
-const removeImageBtn = document.getElementById("removeImageBtn");
+const imageThumbs = document.getElementById("imageThumbs");
 
 const essayInput = document.getElementById("essayInput");
 const charCount = document.getElementById("charCount");
 
 const MAX_TEXT_LENGTH = 8000;
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_IMAGES = 5;
 
 let currentMode = "image";
-let selectedImage = null; // { base64, mediaType }
+let selectedImages = []; // [{ base64, mediaType }]
 
 const CATEGORY_META = {
   "Grammar": { cls: "cat-grammar", label: "🔴 문법 (Grammar)" },
@@ -64,33 +64,73 @@ function readFileAsBase64(file) {
   });
 }
 
-async function handleImageFile(file) {
-  hideError();
-  if (!file) return;
+function renderImageThumbs() {
+  imageThumbs.innerHTML = "";
+  selectedImages.forEach((img, index) => {
+    const thumb = document.createElement("div");
+    thumb.className = "thumb";
+    thumb.innerHTML = `
+      <img src="data:${img.mediaType};base64,${img.base64}" alt="업로드한 에세이 페이지 ${index + 1}" />
+      <span class="thumb-index">${index + 1}</span>
+      <button type="button" class="thumb-remove" data-index="${index}" aria-label="이미지 제거">×</button>
+    `;
+    imageThumbs.appendChild(thumb);
+  });
 
-  if (!["image/jpeg", "image/png", "image/gif", "image/webp"].includes(file.type)) {
-    showError("지원하지 않는 이미지 형식입니다. (JPEG, PNG, GIF, WEBP만 지원)");
-    return;
-  }
-  if (file.size > MAX_IMAGE_BYTES) {
-    showError("이미지 용량이 너무 큽니다. 10MB 이하로 업로드해주세요.");
-    return;
-  }
-
-  try {
-    const base64 = await readFileAsBase64(file);
-    selectedImage = { base64, mediaType: file.type };
-    imagePreview.src = `data:${file.type};base64,${base64}`;
-    imagePreview.hidden = false;
-    dropzoneEmpty.hidden = true;
-    removeImageBtn.hidden = false;
-  } catch {
-    showError("이미지를 읽는 중 오류가 발생했습니다.");
+  const remaining = MAX_IMAGES - selectedImages.length;
+  if (remaining <= 0) {
+    dropzone.classList.add("disabled");
+    dropzoneText.textContent = `최대 ${MAX_IMAGES}장까지 업로드했습니다`;
+  } else {
+    dropzone.classList.remove("disabled");
+    dropzoneText.textContent =
+      selectedImages.length === 0
+        ? "클릭하거나 이미지를 끌어다 놓으세요"
+        : `이미지 추가 (${selectedImages.length}/${MAX_IMAGES})`;
   }
 }
 
+imageThumbs.addEventListener("click", (e) => {
+  const btn = e.target.closest(".thumb-remove");
+  if (!btn) return;
+  const index = Number(btn.dataset.index);
+  selectedImages.splice(index, 1);
+  renderImageThumbs();
+});
+
+async function handleImageFiles(fileList) {
+  hideError();
+  const files = Array.from(fileList || []);
+  if (files.length === 0) return;
+
+  for (const file of files) {
+    if (selectedImages.length >= MAX_IMAGES) {
+      showError(`이미지는 최대 ${MAX_IMAGES}장까지 업로드할 수 있습니다.`);
+      break;
+    }
+    if (!["image/jpeg", "image/png", "image/gif", "image/webp"].includes(file.type)) {
+      showError("지원하지 않는 이미지 형식입니다. (JPEG, PNG, GIF, WEBP만 지원)");
+      continue;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      showError("이미지 용량이 너무 큽니다. 장당 5MB 이하로 업로드해주세요.");
+      continue;
+    }
+
+    try {
+      const base64 = await readFileAsBase64(file);
+      selectedImages.push({ base64, mediaType: file.type });
+    } catch {
+      showError("이미지를 읽는 중 오류가 발생했습니다.");
+    }
+  }
+
+  renderImageThumbs();
+}
+
 imageFileInput.addEventListener("change", (e) => {
-  handleImageFile(e.target.files[0]);
+  handleImageFiles(e.target.files);
+  imageFileInput.value = "";
 });
 
 ["dragenter", "dragover"].forEach((evt) => {
@@ -106,17 +146,14 @@ imageFileInput.addEventListener("change", (e) => {
   });
 });
 dropzone.addEventListener("drop", (e) => {
-  const file = e.dataTransfer.files && e.dataTransfer.files[0];
-  handleImageFile(file);
+  handleImageFiles(e.dataTransfer.files);
 });
 
-removeImageBtn.addEventListener("click", (e) => {
-  e.preventDefault();
-  selectedImage = null;
-  imageFileInput.value = "";
-  imagePreview.hidden = true;
-  dropzoneEmpty.hidden = false;
-  removeImageBtn.hidden = true;
+dropzone.addEventListener("click", (e) => {
+  if (selectedImages.length >= MAX_IMAGES) {
+    e.preventDefault();
+    showError(`이미지는 최대 ${MAX_IMAGES}장까지 업로드할 수 있습니다.`);
+  }
 });
 
 // ---------- Text mode ----------
@@ -130,7 +167,8 @@ essayInput.addEventListener("input", () => {
 clearBtn.addEventListener("click", () => {
   essayInput.value = "";
   charCount.textContent = `0 / ${MAX_TEXT_LENGTH}`;
-  removeImageBtn.click();
+  selectedImages = [];
+  renderImageThumbs();
   resultPanel.hidden = true;
   hideError();
 });
@@ -351,11 +389,15 @@ async function handleCheck() {
 
   let body;
   if (currentMode === "image") {
-    if (!selectedImage) {
+    if (selectedImages.length === 0) {
       showError("첨삭할 에세이 이미지를 업로드해주세요.");
       return;
     }
-    body = { mode: "image", imageBase64: selectedImage.base64, mediaType: selectedImage.mediaType, level: levelSelect.value };
+    body = {
+      mode: "image",
+      images: selectedImages.map((img) => ({ data: img.base64, mediaType: img.mediaType })),
+      level: levelSelect.value,
+    };
   } else {
     const essay = essayInput.value.trim();
     if (!essay) {
@@ -397,3 +439,5 @@ async function handleCheck() {
 }
 
 checkBtn.addEventListener("click", handleCheck);
+
+renderImageThumbs();

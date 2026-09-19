@@ -33,16 +33,15 @@
       </div>
 
       <div id="imageMode" class="mode-panel">
+        <div id="imageThumbs" class="image-thumbs"></div>
         <label class="dropzone" id="dropzone" for="imageFile">
-          <input type="file" id="imageFile" accept="image/jpeg,image/png,image/gif,image/webp" hidden />
-          <div id="dropzoneEmpty">
+          <input type="file" id="imageFile" accept="image/jpeg,image/png,image/gif,image/webp" multiple hidden />
+          <div id="dropzoneContent">
             <p class="dz-icon">🖼️</p>
-            <p>클릭하거나 이미지를 끌어다 놓으세요</p>
-            <p class="dz-sub">JPEG / PNG / GIF / WEBP, 최대 10MB</p>
+            <p id="dropzoneText">클릭하거나 이미지를 끌어다 놓으세요</p>
+            <p class="dz-sub">JPEG / PNG / GIF / WEBP, 장당 최대 5MB · 최대 5장 (여러 페이지 지원)</p>
           </div>
-          <img id="imagePreview" hidden alt="업로드한 에세이 미리보기" />
         </label>
-        <button id="removeImageBtn" class="ghost-btn" hidden>이미지 제거</button>
       </div>
 
       <div id="textMode" class="mode-panel" hidden>

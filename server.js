@@ -9,12 +9,14 @@ import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
-app.use(express.json({ limit: "15mb" }));
+app.use(express.json({ limit: "30mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
 const MODEL = "claude-opus-5";
 const MAX_ESSAY_LENGTH = 8000;
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
+const MAX_IMAGES = 5;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB per image
+const MAX_TOTAL_IMAGE_BYTES = 20 * 1024 * 1024; // 20MB combined
 const ALLOWED_MEDIA_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
 
 const ERROR_CATEGORIES = [
@@ -98,6 +100,7 @@ Your task is to analyze a student's English essay - which may come from a handwr
 - If a word/phrase is likely an OCR or legibility error, put it in "ocr_issues" - NOT in "errors". Never double-count the same span in both lists.
 - Preserve the student's original meaning and writing style.
 - If the input was already typed text (no image), "ocr_issues" must be an empty array.
+- If multiple images are provided, they are sequential pages of the same handwritten essay, in the order given. Transcribe each page in order and join them into one continuous "transcribed_text" (do not repeat page numbers/headers unless they are part of the essay content itself).
 
 ## 2. Error Identification
 Identify every meaningful error. Each error gets exactly one category: Grammar, Spelling, Vocabulary/Word Choice, Punctuation, Sentence Structure/Naturalness, Organization/Coherence, or Other.
@@ -144,7 +147,7 @@ function estimateBase64Bytes(base64) {
 }
 
 app.post("/api/check", async (req, res) => {
-  const { mode, essay, imageBase64, mediaType, level } = req.body ?? {};
+  const { mode, essay, images, level } = req.body ?? {};
 
   const levelText =
     typeof level === "string" && level.trim().length > 0 ? level.trim() : "General student";
@@ -152,27 +155,45 @@ app.post("/api/check", async (req, res) => {
   let userContent;
 
   if (mode === "image") {
-    if (typeof imageBase64 !== "string" || imageBase64.length === 0) {
+    if (!Array.isArray(images) || images.length === 0) {
       return res.status(400).json({ error: "업로드된 이미지가 없습니다." });
     }
-    if (!ALLOWED_MEDIA_TYPES.includes(mediaType)) {
-      return res.status(400).json({ error: "지원하지 않는 이미지 형식입니다. (JPEG, PNG, GIF, WEBP만 지원)" });
+    if (images.length > MAX_IMAGES) {
+      return res.status(400).json({ error: `이미지는 최대 ${MAX_IMAGES}장까지 업로드할 수 있습니다.` });
     }
-    if (estimateBase64Bytes(imageBase64) > MAX_IMAGE_BYTES) {
-      return res.status(400).json({ error: "이미지 용량이 너무 큽니다. 10MB 이하로 업로드해주세요." });
+
+    let totalBytes = 0;
+    for (const img of images) {
+      if (!img || typeof img.data !== "string" || img.data.length === 0) {
+        return res.status(400).json({ error: "이미지 데이터를 읽을 수 없습니다." });
+      }
+      if (!ALLOWED_MEDIA_TYPES.includes(img.mediaType)) {
+        return res.status(400).json({ error: "지원하지 않는 이미지 형식입니다. (JPEG, PNG, GIF, WEBP만 지원)" });
+      }
+      const bytes = estimateBase64Bytes(img.data);
+      if (bytes > MAX_IMAGE_BYTES) {
+        return res.status(400).json({ error: "이미지 용량이 너무 큽니다. 장당 5MB 이하로 업로드해주세요." });
+      }
+      totalBytes += bytes;
+    }
+    if (totalBytes > MAX_TOTAL_IMAGE_BYTES) {
+      return res.status(400).json({ error: "업로드한 이미지의 총 용량이 너무 큽니다. 20MB 이하로 맞춰주세요." });
     }
 
     userContent = [
-      {
+      ...images.map((img) => ({
         type: "image",
-        source: { type: "base64", media_type: mediaType, data: imageBase64 },
-      },
+        source: { type: "base64", media_type: img.mediaType, data: img.data },
+      })),
       {
         type: "text",
         text:
           `Student level: ${levelText}\n\n` +
-          "The image contains a student's handwritten English essay. Transcribe it via OCR into transcribed_text, " +
-          "then analyze it following your instructions. Flag any illegible or uncertain words as ocr_issues rather than writing errors.",
+          (images.length > 1
+            ? `The ${images.length} images contain sequential pages of a student's handwritten English essay, in order. `
+            : "The image contains a student's handwritten English essay. ") +
+          "Transcribe it via OCR into transcribed_text, then analyze it following your instructions. " +
+          "Flag any illegible or uncertain words as ocr_issues rather than writing errors.",
       },
     ];
   } else {
