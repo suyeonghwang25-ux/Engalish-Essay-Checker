@@ -23,6 +23,10 @@
 
 * { box-sizing: border-box; }
 
+/* An author rule that sets `display` on an element (e.g. `.loading { display: flex }`)
+   otherwise overrides the browser's default `[hidden] { display: none }` UA style. */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
@@ -76,31 +80,67 @@ main.wrap {
   margin-bottom: 20px;
 }
 
-.tabs {
+.api-key-card h2, .input-panel h2, .essay-card h2, .score-table-card h2,
+.corrections-card h2, .feedback-card h2 {
+  margin-top: 0;
+  font-size: 18px;
+}
+
+.api-key-card .hint {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 0;
+}
+
+.api-key-card .hint a { color: var(--primary); }
+
+.key-row {
   display: flex;
   gap: 8px;
-  margin-bottom: 18px;
+  margin-bottom: 14px;
 }
 
-.tab-btn {
+#apiKeyInput {
   flex: 1;
-  padding: 12px 14px;
-  border-radius: 10px;
+  padding: 10px 14px;
+  border-radius: 8px;
   border: 1px solid var(--border);
-  background: #f5f6fb;
-  color: var(--muted);
   font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
+  font-family: inherit;
 }
 
-.tab-btn.active {
-  background: var(--primary);
-  color: white;
-  border-color: var(--primary);
+#apiKeyInput:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
 }
 
-.mode-panel[hidden] { display: none; }
+.key-status {
+  font-size: 13px;
+  margin: 0;
+}
+
+.key-status.ok { color: var(--success); }
+.key-status.warn { color: var(--warn); }
+
+#modelSelect, #customModelInput {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  font-size: 14px;
+  background: white;
+}
+
+#customModelInput { flex: 1; }
+
+.privacy-banner {
+  background: #fff6e6;
+  border: 1px solid #f3ddb0;
+  color: #7a5a17;
+  padding: 12px 16px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  margin-bottom: 20px;
+}
 
 .dropzone {
   display: flex;
@@ -206,24 +246,7 @@ main.wrap {
   background: white;
 }
 
-.char-count {
-  margin-left: auto;
-  font-size: 13px;
-  color: var(--muted);
-}
-
-textarea#essayInput {
-  width: 100%;
-  min-height: 240px;
-  padding: 16px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  font-size: 15px;
-  font-family: inherit;
-  resize: vertical;
-}
-
-textarea#essayInput:focus, #level:focus {
+#level:focus {
   outline: 2px solid var(--primary);
   outline-offset: 1px;
 }
@@ -295,6 +318,7 @@ textarea#essayInput:focus, #level:focus {
   display: flex;
   gap: 24px;
   align-items: center;
+  margin-bottom: 18px;
 }
 
 .score-circle {
@@ -340,8 +364,6 @@ textarea#essayInput:focus, #level:focus {
   color: var(--muted);
 }
 
-.score-table-card h3 { margin-top: 0; font-size: 16px; }
-
 .score-table {
   width: 100%;
   border-collapse: collapse;
@@ -366,8 +388,27 @@ textarea#essayInput:focus, #level:focus {
   border-top: 2px solid var(--border);
 }
 
-.feedback-card h3 { margin-top: 0; }
 .feedback-card h4 { margin: 0 0 8px; font-size: 14px; }
+
+.corrections-card h3, #ocrCard h3 {
+  font-size: 14.5px;
+  color: var(--muted);
+  margin: 18px 0 4px;
+}
+
+.corrections-card h3:first-of-type, #ocrCard h3 { margin-top: 0; }
+
+#ocrCard {
+  margin-bottom: 18px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+#ocrCard .hint, .corrections-card .hint {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: -2px;
+}
 
 .feedback-grid {
   display: grid;
@@ -411,8 +452,8 @@ textarea#essayInput:focus, #level:focus {
   display: inline-block;
 }
 
-.essay-card h3 { margin-top: 0; font-size: 16px; }
 .essay-card .hint { color: var(--muted); font-size: 13px; margin-top: -4px; }
+.essay-card .hint code { background: #eef0f6; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
 
 .essay-box {
   white-space: pre-wrap;
@@ -522,5 +563,5 @@ mark.cat-ocr {
 @media (max-width: 640px) {
   .score-card { flex-direction: column; text-align: center; }
   .feedback-grid { grid-template-columns: 1fr; }
-  .tabs { flex-direction: column; }
+  .key-row { flex-wrap: wrap; }
 }
