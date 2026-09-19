@@ -9,27 +9,126 @@ import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "15mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
 const MODEL = "claude-opus-5";
 const MAX_ESSAY_LENGTH = 8000;
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
+const ALLOWED_MEDIA_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
 
-const CorrectionSchema = z.object({
-  category: z.enum(["문법", "어휘", "문장 구조", "내용/논리", "문체"]),
-  original: z.string().describe("에세이 원문에서 그대로 발췌한 문제 구간(정확히 일치해야 함)"),
-  suggestion: z.string().describe("수정 제안 문구"),
-  explanation: z.string().describe("한국어로 작성된, 왜 수정이 필요한지에 대한 간결한 설명"),
+const ERROR_CATEGORIES = [
+  "Grammar",
+  "Spelling",
+  "Vocabulary/Word Choice",
+  "Punctuation",
+  "Sentence Structure/Naturalness",
+  "Organization/Coherence",
+  "Other",
+];
+
+const ErrorItemSchema = z.object({
+  original: z.string().describe("Exact substring from the transcribed essay text that contains the error"),
+  correction: z.string().describe("The corrected version of that substring"),
+  category: z.enum(ERROR_CATEGORIES),
+  explanation: z.string().describe("Brief explanation useful to an English teacher"),
+  severity: z.enum(["Minor", "Moderate", "Major"]),
+});
+
+const OcrIssueSchema = z.object({
+  ocr_text: z
+    .string()
+    .describe("Exact substring from the transcribed text that is uncertain due to OCR/handwriting legibility"),
+  likely_intended: z
+    .string()
+    .nullable()
+    .describe("Best guess of the intended word/phrase if reasonably certain from context, otherwise null"),
+  note: z.string().describe("Why this is flagged as an OCR/legibility uncertainty rather than a student error"),
+});
+
+const ScoreCategorySchema = z.object({
+  score: z.number().describe("Points awarded in this category"),
+  max: z.number().describe("Maximum possible points in this category"),
+  comment: z.string().describe("Brief justification for the score"),
 });
 
 const EssayReviewSchema = z.object({
-  corrected_essay: z.string().describe("문법과 표현이 교정된 영어 에세이 전문"),
-  overall_score: z.number().min(0).max(100).describe("100점 만점 기준 종합 점수"),
-  summary: z.string().describe("한국어로 작성된 전반적인 총평 (2~4문장)"),
-  strengths: z.array(z.string()).describe("에세이의 잘된 점 (한국어)"),
-  improvements: z.array(z.string()).describe("보완이 필요한 점 (한국어)"),
-  corrections: z.array(CorrectionSchema).describe("구체적인 첨삭 사항 목록"),
+  transcribed_text: z
+    .string()
+    .describe(
+      "The full essay text exactly as transcribed (verbatim, uncorrected). If the input was already typed text, this equals that text."
+    ),
+  essay_info: z.object({
+    word_count: z.number(),
+    sentence_count: z.number(),
+    avg_sentence_length: z.number().describe("word_count divided by sentence_count, rounded to 1 decimal"),
+  }),
+  ocr_issues: z
+    .array(OcrIssueSchema)
+    .describe("Words/phrases that are uncertain due to OCR or handwriting legibility, not writing errors. Empty array if the input was typed text or nothing is uncertain."),
+  errors: z.array(ErrorItemSchema).describe("Every meaningful writing error found in the transcribed text"),
+  scores: z.object({
+    grammar: ScoreCategorySchema,
+    vocabulary: ScoreCategorySchema,
+    content: ScoreCategorySchema,
+    organization: ScoreCategorySchema,
+    mechanics: ScoreCategorySchema,
+    total: z.number().describe("Sum of the five category scores, out of 100"),
+  }),
+  feedback: z.object({
+    strengths: z.array(z.string()).describe("2-3 specific strengths"),
+    areas_to_improve: z.array(z.string()).describe("2-4 most important areas the student should work on"),
+    teaching_points: z.array(z.string()).describe("Practical points a teacher can address in the next lesson"),
+    overall: z.string().describe("Short paragraph summarizing writing ability, weaknesses, and next steps"),
+  }),
+  corrected_essay: z
+    .string()
+    .describe(
+      "The essay with only necessary corrections applied, in Markdown, with changed words/phrases wrapped in **bold**. Do not rewrite sentences that were already acceptable."
+    ),
 });
+
+const SYSTEM_PROMPT = `You are an English essay correction and assessment assistant designed specifically for English teachers.
+
+Your task is to analyze a student's English essay - which may come from a handwritten essay converted via OCR, or from already-typed text - and return a structured assessment.
+
+## 1. OCR Text Verification (only relevant when the input is an image)
+- Carefully review the transcribed text.
+- Do not automatically "correct" unclear words unless the intended word is reasonably certain from context.
+- If a word/phrase is likely an OCR or legibility error, put it in "ocr_issues" - NOT in "errors". Never double-count the same span in both lists.
+- Preserve the student's original meaning and writing style.
+- If the input was already typed text (no image), "ocr_issues" must be an empty array.
+
+## 2. Error Identification
+Identify every meaningful error. Each error gets exactly one category: Grammar, Spelling, Vocabulary/Word Choice, Punctuation, Sentence Structure/Naturalness, Organization/Coherence, or Other.
+For each error give: the exact original substring, the corrected substring, category, a brief explanation useful to a teacher, and severity (Minor/Moderate/Major).
+Do not flag stylistic preferences as definite errors. Do not mark a sentence wrong simply because another phrasing sounds more sophisticated. Do not invent errors.
+Every "original" and every ocr_issues "ocr_text" must be an exact, verbatim substring of "transcribed_text" (matching whitespace and punctuation) - this is used to highlight the text programmatically.
+
+## 3. Word Count
+Count total words, sentences, and average words per sentence (word_count / sentence_count). Do not count punctuation as separate words.
+
+## 4. Essay Score (out of 100)
+- Grammar: 25 points
+- Vocabulary / Word Choice: 20 points
+- Content / Development: 20 points
+- Organization / Coherence: 20 points
+- Spelling / Punctuation / Mechanics: 15 points
+Give a score, max, and brief justification for each category. Do not inflate the score simply because the essay is understandable - evaluate rigorously against the apparent grade/level provided.
+
+## 5. Teacher's Final Feedback
+- Strengths: 2-3 specific strengths.
+- Areas to improve: the 2-4 most important areas.
+- Teaching points: practical points for the next lesson.
+- Overall: a short paragraph summarizing current ability, major weaknesses, and next steps. Avoid overly advanced terminology unless necessary.
+
+## 6. Corrected Essay
+Provide the essay with only necessary corrections applied, wrapping changed words/phrases in **bold** Markdown. Do not rewrite sentences that were already acceptable, and do not unnecessarily rephrase.
+
+## General rules
+- If the student's intended meaning is unclear, say so explicitly rather than guessing.
+- Distinguish between an actual grammatical error and an optional stylistic improvement; avoid correcting acceptable phrasing merely because it isn't your preferred wording.
+- Keep feedback specific, evidence-based, and useful to an English teacher.`;
 
 function getClient() {
   if (!process.env.ANTHROPIC_API_KEY) {
@@ -38,20 +137,64 @@ function getClient() {
   return new Anthropic();
 }
 
-app.post("/api/check", async (req, res) => {
-  const { essay, level } = req.body ?? {};
+function estimateBase64Bytes(base64) {
+  const len = base64.length;
+  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+  return (len * 3) / 4 - padding;
+}
 
-  if (typeof essay !== "string" || essay.trim().length === 0) {
-    return res.status(400).json({ error: "첨삭할 에세이 내용을 입력해주세요." });
-  }
-  if (essay.length > MAX_ESSAY_LENGTH) {
-    return res.status(400).json({
-      error: `에세이가 너무 깁니다. ${MAX_ESSAY_LENGTH}자 이내로 입력해주세요. (현재 ${essay.length}자)`,
-    });
-  }
+app.post("/api/check", async (req, res) => {
+  const { mode, essay, imageBase64, mediaType, level } = req.body ?? {};
 
   const levelText =
-    typeof level === "string" && level.trim().length > 0 ? level.trim() : "일반 학습자";
+    typeof level === "string" && level.trim().length > 0 ? level.trim() : "General student";
+
+  let userContent;
+
+  if (mode === "image") {
+    if (typeof imageBase64 !== "string" || imageBase64.length === 0) {
+      return res.status(400).json({ error: "업로드된 이미지가 없습니다." });
+    }
+    if (!ALLOWED_MEDIA_TYPES.includes(mediaType)) {
+      return res.status(400).json({ error: "지원하지 않는 이미지 형식입니다. (JPEG, PNG, GIF, WEBP만 지원)" });
+    }
+    if (estimateBase64Bytes(imageBase64) > MAX_IMAGE_BYTES) {
+      return res.status(400).json({ error: "이미지 용량이 너무 큽니다. 10MB 이하로 업로드해주세요." });
+    }
+
+    userContent = [
+      {
+        type: "image",
+        source: { type: "base64", media_type: mediaType, data: imageBase64 },
+      },
+      {
+        type: "text",
+        text:
+          `Student level: ${levelText}\n\n` +
+          "The image contains a student's handwritten English essay. Transcribe it via OCR into transcribed_text, " +
+          "then analyze it following your instructions. Flag any illegible or uncertain words as ocr_issues rather than writing errors.",
+      },
+    ];
+  } else {
+    if (typeof essay !== "string" || essay.trim().length === 0) {
+      return res.status(400).json({ error: "첨삭할 에세이 내용을 입력해주세요." });
+    }
+    if (essay.length > MAX_ESSAY_LENGTH) {
+      return res.status(400).json({
+        error: `에세이가 너무 깁니다. ${MAX_ESSAY_LENGTH}자 이내로 입력해주세요. (현재 ${essay.length}자)`,
+      });
+    }
+
+    userContent = [
+      {
+        type: "text",
+        text:
+          `Student level: ${levelText}\n\n` +
+          "This text was already typed (no OCR needed - ocr_issues must be an empty array). " +
+          `Please analyze this English essay:\n\n"""\n${essay}\n"""`,
+      },
+    ];
+  }
 
   try {
     const client = getClient();
@@ -59,18 +202,8 @@ app.post("/api/check", async (req, res) => {
     const response = await client.beta.messages.parse({
       model: MODEL,
       max_tokens: 16000,
-      system:
-        "당신은 숙련된 영어 작문 교사입니다. 학습자가 제출한 영어 에세이를 첨삭합니다. " +
-        "문법, 어휘 선택, 문장 구조, 논리적 흐름을 검토하고 개선된 버전을 제시하세요. " +
-        "corrections 배열의 각 'original' 필드는 에세이 원문에서 공백과 철자까지 정확히 일치하는 부분 문자열이어야 합니다(하이라이트 표시에 사용됨). " +
-        "설명과 총평은 한국어로 작성하되, 에세이 본문과 교정문(corrected_essay)은 영어를 유지하세요.",
-      messages: [
-        {
-          role: "user",
-          content:
-            `학습자 수준: ${levelText}\n\n다음 영어 에세이를 첨삭해주세요:\n\n"""\n${essay}\n"""`,
-        },
-      ],
+      system: SYSTEM_PROMPT,
+      messages: [{ role: "user", content: userContent }],
       output_format: betaZodOutputFormat(EssayReviewSchema),
     });
 
