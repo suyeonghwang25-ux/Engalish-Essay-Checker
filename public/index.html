@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Engalish - 영어 에세이 첨삭기</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="wrap">
+      <h1>Engalish <span>영어 에세이 첨삭기</span></h1>
+      <p class="tagline">AI가 문법, 어휘, 구조를 분석하고 한국어로 설명해드려요.</p>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="input-panel">
+      <div class="field-row">
+        <label for="level">학습자 수준</label>
+        <select id="level">
+          <option value="중학생">중학생</option>
+          <option value="고등학생" selected>고등학생</option>
+          <option value="대학생">대학생</option>
+          <option value="일반 성인 학습자">일반 성인 학습자</option>
+          <option value="비즈니스/공식 영어">비즈니스/공식 영어</option>
+        </select>
+        <span id="charCount" class="char-count">0 / 8000</span>
+      </div>
+
+      <textarea
+        id="essayInput"
+        placeholder="여기에 영어 에세이를 붙여넣으세요... (예: My Summer Vacation, Why I Want to Study Abroad, etc.)"
+        maxlength="8000"
+      ></textarea>
+
+      <div class="actions">
+        <button id="checkBtn" class="primary-btn">첨삭 받기</button>
+        <button id="clearBtn" class="ghost-btn">지우기</button>
+      </div>
+
+      <p id="errorMsg" class="error-msg" hidden></p>
+    </section>
+
+    <section id="resultPanel" class="result-panel" hidden>
+      <div class="score-card">
+        <div class="score-circle">
+          <span id="scoreValue">-</span>
+          <small>/ 100</small>
+        </div>
+        <div class="summary-text">
+          <h2>총평</h2>
+          <p id="summaryText"></p>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <div class="lists-card">
+          <h3>👍 잘된 점</h3>
+          <ul id="strengthsList"></ul>
+        </div>
+        <div class="lists-card">
+          <h3>✏️ 보완할 점</h3>
+          <ul id="improvementsList"></ul>
+        </div>
+      </div>
+
+      <div class="essay-card">
+        <h3>원문 (첨삭 표시)</h3>
+        <p class="hint">밑줄 친 부분에 마우스를 올리면 수정 제안을 볼 수 있어요.</p>
+        <div id="highlightedEssay" class="essay-box"></div>
+      </div>
+
+      <div class="essay-card">
+        <h3>교정된 에세이</h3>
+        <div id="correctedEssay" class="essay-box corrected"></div>
+      </div>
+
+      <div class="corrections-card">
+        <h3>세부 첨삭 목록 (<span id="correctionCount">0</span>건)</h3>
+        <div id="correctionsList" class="corrections-list"></div>
+      </div>
+    </section>
+
+    <div id="loading" class="loading" hidden>
+      <div class="spinner"></div>
+      <p>AI가 에세이를 분석하고 있어요...</p>
+    </div>
+  </main>
+
+  <footer class="app-footer">
+    <p>본 서비스는 AI가 제공하는 참고용 첨삭이며, 최종 검토는 사람이 하는 것을 권장합니다.</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
